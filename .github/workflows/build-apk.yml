@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,8 +20,7 @@ jobs:
       - name: Extract project
         run: |
           unzip -q ShadowFight2Bot_Android_Source_CloudBuild.zip -d /tmp/sf2
-          cd /tmp/sf2/ShadowFight2Bot
-          echo "PROJECT_DIR=/tmp/sf2/ShadowFight2Bot" >> $GITHUB_ENV
+          echo "PROJECT_DIR=/tmp/sf2/ShadowFight2Bot" >> "$GITHUB_ENV"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -37,16 +37,42 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Configure JVM targets
+        run: |
+          cat > "$RUNNER_TEMP/jvm17.init.gradle" <<'GRADLE'
+          allprojects {
+              tasks.withType(
+                  org.gradle.api.tasks.compile.JavaCompile
+              ).configureEach {
+                  sourceCompatibility = '17'
+                  targetCompatibility = '17'
+              }
+
+              tasks.configureEach { task ->
+                  if (task.name.toLowerCase().contains('kotlin') &&
+                      task.hasProperty('kotlinOptions')) {
+                      task.kotlinOptions.jvmTarget = '17'
+                  }
+              }
+          }
+          GRADLE
 
       - name: Build APK
         run: |
           cd "$PROJECT_DIR"
-          gradle --no-daemon assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/ShadowFight2Bot.apk"
+          gradle --no-daemon \
+            --init-script "$RUNNER_TEMP/jvm17.init.gradle" \
+            assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "$GITHUB_WORKSPACE/ShadowFight2Bot.apk"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ShadowFight2Bot-APK
           path: ShadowFight2Bot.apk
+          if-no-files-found: error
